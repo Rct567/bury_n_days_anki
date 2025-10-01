@@ -34,6 +34,18 @@ def add_context_menu(browser: Browser) -> None:
     action = QAction("Bury N days", browser)
     action.triggered.connect(lambda _, b=browser: bury_selected(b))
     browser.form.menu_Cards.addAction(action)
+    
+    
+def mark_cards_as_n_buried(cids: list[int], days: int) -> None:
+    """Mark cards as buried for a given number of days."""
+    until_ts = int(time.time() + days * 86400)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    for cid in cids:
+        c.execute("INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", (cid, until_ts))
+    conn.commit()
+    conn.close()
 
 
 def bury_selected(browser: Browser) -> None:
@@ -48,14 +60,7 @@ def bury_selected(browser: Browser) -> None:
     if not ok:
         return
 
-    until_ts = int(time.time() + days * 86400)
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    for cid in cids:
-        c.execute("INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", (cid, until_ts))
-    conn.commit()
-    conn.close()
+    mark_cards_as_n_buried(cids, days)
 
     mw.col.sched.buryCards(cids)
     tooltip("Buried {} cards for {} days".format(len(cids), days))
