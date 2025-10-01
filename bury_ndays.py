@@ -90,3 +90,16 @@ init_db()
 addHook("browser.setupMenus", add_context_menu)
 addHook("profileLoaded", reapply_buries)
 addHook("profileLoaded", cleanup_expired)
+
+try:
+    from aqt import gui_hooks
+
+    def on_sync_finished(*_) -> None:
+        reapply_buries()
+        cleanup_expired()
+
+    gui_hooks.sync_did_finish.append(on_sync_finished)
+
+except ImportError:
+    # very old Anki, no gui_hooks
+    pass
