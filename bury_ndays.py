@@ -1,3 +1,4 @@
+from typing import Optional
 from aqt import mw
 from aqt.qt import QAction, QInputDialog, QMessageBox
 from aqt.browser import Browser
@@ -38,7 +39,7 @@ def add_context_menu(browser: Browser) -> None:
     browser.form.menu_Cards.addAction(action)
 
 
-def parse_days_range(text: str) -> tuple[int, int]:
+def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     """Parse input as either a single number or a range, return (low, high)."""
     text = text.strip()
     if "-" in text:
@@ -46,21 +47,25 @@ def parse_days_range(text: str) -> tuple[int, int]:
             low, high = text.split("-", 1)
             low_val, high_val = int(low), int(high)
             if low_val > high_val:
-                low_val, high_val = high_val, low_val
-            return low_val, high_val
+                return None
         except ValueError:
-            raise ValueError("Invalid range format")
+            return None
     else:
         val = int(text)
-        return val, val
+        low_val, high_val = val, val
+    
+    if low_val < 1:
+        return None
+        
+    return low_val, high_val
 
 
-def mark_cards_as_n_buried(cids: list[int], low: int, high: int) -> None:
+def mark_cards_as_n_buried(cids: list[int], days_range: tuple[int, int]) -> None:
     """Mark cards as buried for random number of days in [low, high]."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     for cid in cids:
-        days = random.randint(low, high)
+        days = random.randint(days_range[0], days_range[1])
         until_ts = int(time.time() + days * 86400)
         c.execute(
             "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", (cid, until_ts))
@@ -75,26 +80,30 @@ def bury_browser_selected(browser: Browser) -> None:
         QMessageBox.information(browser, "Bury N days", "No cards selected.")
         return
 
-    text, ok = QInputDialog.getText(browser, "Bury N days",
-                                    "Enter number of days (e.g. '10' or '1-100'):")
-    if not ok or not text.strip():
-        return
+    days_range: Optional[tuple[int, int]] = None
 
-    try:
-        low, high = parse_days_range(text)
-    except ValueError:
-        QMessageBox.warning(
-            browser, "Bury N days", "Invalid input. Please enter a number or range like '1-100'.")
-        return
+    while days_range is None:
 
-    mark_cards_as_n_buried(cids, low, high)
+        text, ok = QInputDialog.getText(browser, "Bury N days",
+                                        "Enter number of days (e.g. '10' or '1-100'):")
+        if not ok or not text.strip():
+            return
+
+        days_range = parse_days_range(text)
+        
+        if days_range is None:
+            QMessageBox.warning(
+                browser, "Bury N days", "Invalid input. Please enter a number or range like '1-100'.")
+
+
+    mark_cards_as_n_buried(cids, days_range)
     mw.col.sched.buryCards(cids)
 
-    if low == high:
-        tooltip("Buried {} cards for {} days.".format(len(cids), low))
+    if days_range[0] == days_range[1]:
+        tooltip("Buried {} cards for {} days.".format(len(cids), days_range[0]))
     else:
-        tooltip("Buried {} cards for between {}–{} days.".format(
-            len(cids), low, high))
+        tooltip("Buried {} cards for {} to {} days.".format(
+            len(cids), days_range[0], days_range[1]))
 
 
 def cleanup_expired(conn: sqlite3.Connection) -> None:
