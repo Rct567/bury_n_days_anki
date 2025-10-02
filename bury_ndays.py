@@ -116,8 +116,8 @@ def reapply_buries() -> None:
 
     if rows:
         cids = [cid for (cid,) in rows]
-        mw.col.sched.buryCards(cids)
-        tooltip("Re-buried {} cards.".format(len(cids)))
+        op_result = mw.col.sched.buryCards(cids)
+        tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)))
 
     # cleanup
     if random.randint(1, 10) == 1:
