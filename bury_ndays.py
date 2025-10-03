@@ -142,10 +142,14 @@ addHook("profileLoaded", reapply_buries)
 
 try:
     from aqt import gui_hooks
+    
+    def on_sync_will_start(*_) -> None:
+        reapply_buries()
 
     def on_sync_finished(*_) -> None:
         reapply_buries()
 
+    gui_hooks.sync_will_start.append(on_sync_will_start)
     gui_hooks.sync_did_finish.append(on_sync_finished)
 
 except ImportError:

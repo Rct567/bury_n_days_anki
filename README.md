@@ -6,11 +6,10 @@ This add-on allows you to bury selected cards in Anki for a specific number of d
 
 * Adds **“Bury N days”** option to the Browser context menu.
 * Input either:
-
   * A single number (`10`) → buries for 10 days.
   * A range (`1-100`) → buries each card for a random number of days between 1 and 100.
 * Persists buried cards across restarts and syncs.
-* Re-applies buries on profile load and after sync.
+* Re-applies buries on profile load, before sync and after sync.
 
 ## Installation
 
@@ -32,7 +31,6 @@ This add-on allows you to bury selected cards in Anki for a specific number of d
   ```
   user_files/bury.db
   ```
-* Cards are automatically re-buried at startup and after sync if their bury period has not yet expired.
 * Occasionally, expired entries are cleaned up automatically.
 
 ---
