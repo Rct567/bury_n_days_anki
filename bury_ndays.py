@@ -2,6 +2,7 @@ from typing import Optional
 from aqt import mw
 from aqt.qt import QAction, QInputDialog, QMessageBox
 from aqt.browser import Browser
+from aqt.reviewer import Reviewer
 from aqt.utils import tooltip
 from anki.hooks import addHook
 
@@ -32,13 +33,6 @@ def init_db() -> None:
     conn.close()
 
 
-def add_context_menu(browser: Browser) -> None:
-    """Add 'Bury N days' option to Browser context menu."""
-    action = QAction("Bury N days", browser)
-    action.triggered.connect(lambda _, b=browser: bury_browser_selected(b))
-    browser.form.menu_Cards.addAction(action)
-
-
 def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     """Parse input as either a single number or a range, return (low, high)."""
     text = text.strip()
@@ -53,10 +47,10 @@ def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     else:
         val = int(text)
         low_val, high_val = val, val
-    
+
     if low_val < 1:
         return None
-        
+
     return low_val, high_val
 
 
@@ -68,42 +62,89 @@ def mark_cards_as_n_buried(cids: list[int], days_range: tuple[int, int]) -> None
         days = random.randint(days_range[0], days_range[1])
         until_ts = int(time.time() + days * 86400)
         c.execute(
-            "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", (cid, until_ts))
+            "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", (cid, until_ts)
+        )
     conn.commit()
     conn.close()
 
 
-def bury_browser_selected(browser: Browser) -> None:
-    """Handle burying of selected cards/notes."""
-    cids = browser.selectedCards()
-    if not cids:
-        QMessageBox.information(browser, "Bury N days", "No cards selected.")
-        return
-
+def ask_days_range(parent) -> Optional[tuple[int, int]]:
+    """Ask user for bury days input until valid or canceled."""
     days_range: Optional[tuple[int, int]] = None
-
     while days_range is None:
-
-        text, ok = QInputDialog.getText(browser, "Bury N days",
-                                        "Enter number of days (e.g. '10' or '1-100'):")
+        text, ok = QInputDialog.getText(
+            parent, "Bury N days", "Enter number of days (e.g. '10' or '1-100'):"
+        )
         if not ok or not text.strip():
-            return
-
+            return None
         days_range = parse_days_range(text)
-        
         if days_range is None:
             QMessageBox.warning(
-                browser, "Bury N days", "Invalid input. Please enter a number or range like '1-100'.")
+                parent,
+                "Bury N days",
+                "Invalid input. Please enter a number or range like '1-100'.",
+            )
+    return days_range
 
+
+def bury_cards_ui(parent, cids: list[int]) -> None:
+    """Shared UI logic for burying given card IDs."""
+    if not cids:
+        QMessageBox.information(parent, "Bury N days", "No cards selected.")
+        return
+
+    days_range = ask_days_range(parent)
+    if not days_range:
+        return
 
     mark_cards_as_n_buried(cids, days_range)
     mw.col.sched.buryCards(cids)
 
     if days_range[0] == days_range[1]:
-        tooltip("Buried {} cards for {} days.".format(len(cids), days_range[0]))
+        tooltip("Buried {} card(s) for {} days.".format(len(cids), days_range[0]))
     else:
-        tooltip("Buried {} cards for {} to {} days.".format(
-            len(cids), days_range[0], days_range[1]))
+        tooltip(
+            "Buried {} card(s) for {} to {} days.".format(
+                len(cids), days_range[0], days_range[1]
+            )
+        )
+
+
+def bury_browser_selected(browser: Browser) -> None:
+    """Triggered from Browser context menu."""
+    bury_cards_ui(browser, browser.selectedCards())
+
+
+def bury_reviewer_card(reviewer: Reviewer) -> None:
+    """Triggered from Reviewer 'More' menu."""
+    if reviewer.card:
+        bury_cards_ui(mw, [reviewer.card.id])
+
+
+def add_context_menu(browser: Browser) -> None:
+    """Add 'Bury N days' option to Browser context menu."""
+    action = QAction("Bury N days", browser)
+    action.triggered.connect(lambda _, b=browser: bury_browser_selected(b))
+    browser.form.menu_Cards.addAction(action)
+
+
+def add_reviewer_menu(view: Reviewer, menu) -> None:
+    """Add 'Bury N days' option to Reviewer More menu, above the first separator."""
+    action = QAction("Bury N days", menu)
+    action.triggered.connect(lambda _, r=view: bury_reviewer_card(r))
+
+    # Find the first separator
+    actions = menu.actions()
+    inserted = False
+    for act in actions:
+        if act.isSeparator():
+            menu.insertAction(act, action)
+            inserted = True
+            break
+
+    if not inserted:
+        # fallback if no separator found → just append
+        menu.addAction(action)
 
 
 def cleanup_expired(conn: sqlite3.Connection) -> None:
@@ -142,7 +183,7 @@ addHook("profileLoaded", reapply_buries)
 
 try:
     from aqt import gui_hooks
-    
+
     def on_sync_will_start(*_) -> None:
         reapply_buries()
 
@@ -151,6 +192,7 @@ try:
 
     gui_hooks.sync_will_start.append(on_sync_will_start)
     gui_hooks.sync_did_finish.append(on_sync_finished)
+    gui_hooks.reviewer_will_show_context_menu.append(add_reviewer_menu)
 
 except ImportError:
     # very old Anki, no gui_hooks

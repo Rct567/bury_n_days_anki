@@ -4,7 +4,7 @@ This add-on allows you to bury selected cards in Anki for a specific number of d
 
 ## Features
 
-* Adds **“Bury N days”** option to the Browser context menu.
+* Adds **“Bury N days”** option to the Browser and Reviewer context menu.
 * Input either:
   * A single number (`10`) → buries for 10 days.
   * A range (`1-100`) → buries each card for a random number of days between 1 and 100.
