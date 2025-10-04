@@ -1,5 +1,5 @@
 from typing import Optional
-from aqt import mw
+from aqt import QMenu, mw
 from aqt.qt import QAction, QInputDialog, QMessageBox
 from aqt.browser import Browser
 from aqt.reviewer import Reviewer
@@ -121,30 +121,39 @@ def bury_reviewer_card(reviewer: Reviewer) -> None:
         bury_cards_ui(mw, [reviewer.card.id])
 
 
+
+def add_action_to_menu(menu: QMenu, new_action: QAction, before_separator_index: int) -> None:
+    """Add action before first separator in menu."""
+    actions = menu.actions()
+    inserted = False
+    num_separators = 0
+    for act in actions:
+        if act.isSeparator():
+            num_separators += 1
+        if num_separators == before_separator_index:
+            menu.insertAction(act, new_action)
+            inserted = True
+            break
+    
+    if not inserted: # fallback if no separator found
+        menu.addAction(new_action)
+
 def add_context_menu(browser: Browser) -> None:
     """Add 'Bury N days' option to Browser context menu."""
     action = QAction("Bury N days", browser)
     action.triggered.connect(lambda _, b=browser: bury_browser_selected(b))
-    browser.form.menu_Cards.addAction(action)
-
-
-def add_reviewer_menu(view: Reviewer, menu) -> None:
+    menu = browser.form.menu_Cards
+    
+    # Add before second separator
+    add_action_to_menu(menu, action, 2)
+    
+def add_reviewer_menu(view: Reviewer, menu: QMenu) -> None:
     """Add 'Bury N days' option to Reviewer More menu, above the first separator."""
     action = QAction("Bury N days", menu)
     action.triggered.connect(lambda _, r=view: bury_reviewer_card(r))
 
-    # Find the first separator
-    actions = menu.actions()
-    inserted = False
-    for act in actions:
-        if act.isSeparator():
-            menu.insertAction(act, action)
-            inserted = True
-            break
-
-    if not inserted:
-        # fallback if no separator found → just append
-        menu.addAction(action)
+    # Add before first separator
+    add_action_to_menu(menu, action, 1)
 
 
 def cleanup_expired(conn: sqlite3.Connection) -> None:
