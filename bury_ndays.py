@@ -11,6 +11,8 @@ import random
 import os
 import time
 
+SECONDS_IN_DAY = 86400
+
 # Path to user_files folder
 ADDON_DIR = os.path.dirname(__file__)
 ADDON_USER_FILES_DIR = os.path.join(ADDON_DIR, "user_files")
@@ -21,32 +23,34 @@ DB_PATH = os.path.join(ADDON_USER_FILES_DIR, "bury.db")
 
 def init_db() -> None:
     """Ensure database exists with correct schema."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS buried (
-            cid INTEGER PRIMARY KEY,
-            until INTEGER
-        )
-    """)
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS buried (
+                cid INTEGER PRIMARY KEY,
+                until INTEGER
+            )
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_buried_until ON buried (until)
+        """)
+        conn.commit()
 
 
 def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     """Parse input as either a single number or a range, return (low, high)."""
     text = text.strip()
-    if "-" in text:
-        try:
+    try:
+        if "-" in text:
             low, high = text.split("-", 1)
             low_val, high_val = int(low), int(high)
             if low_val > high_val:
                 return None
-        except ValueError:
-            return None
-    else:
-        val = int(text)
-        low_val, high_val = val, val
+        else:
+            val = int(text)
+            low_val, high_val = val, val
+    except ValueError:
+        return None
 
     if low_val < 1:
         return None
@@ -56,16 +60,20 @@ def parse_days_range(text: str) -> Optional[tuple[int, int]]:
 
 def mark_cards_as_n_buried(cids: list[int], days_range: tuple[int, int]) -> None:
     """Mark cards as buried for random number of days in [low, high]."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    for cid in cids:
-        days = random.randint(days_range[0], days_range[1])
-        until_ts = int(time.time() + days * 86400)
-        c.execute(
-            "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", (cid, until_ts)
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        data = []
+        current_time = int(time.time())
+
+        for cid in cids:
+            days = random.randint(days_range[0], days_range[1])
+            until_ts = current_time + days * SECONDS_IN_DAY
+            data.append((cid, until_ts))
+
+        c.executemany(
+            "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", data
         )
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 def ask_days_range(parent) -> Optional[tuple[int, int]]:
@@ -121,7 +129,6 @@ def bury_reviewer_card(reviewer: Reviewer) -> None:
         bury_cards_ui(mw, [reviewer.card.id])
 
 
-
 def add_action_to_menu(menu: QMenu, new_action: QAction, before_separator_index: int) -> None:
     """Add action before first separator in menu."""
     actions = menu.actions()
@@ -134,19 +141,21 @@ def add_action_to_menu(menu: QMenu, new_action: QAction, before_separator_index:
             menu.insertAction(act, new_action)
             inserted = True
             break
-    
-    if not inserted: # fallback if no separator found
+
+    if not inserted:  # fallback if no separator found
         menu.addAction(new_action)
+
 
 def add_context_menu(browser: Browser) -> None:
     """Add 'Bury N days' option to Browser context menu."""
     action = QAction("Bury N days", browser)
     action.triggered.connect(lambda _, b=browser: bury_browser_selected(b))
     menu = browser.form.menu_Cards
-    
+
     # Add before second separator
     add_action_to_menu(menu, action, 2)
-    
+
+
 def add_reviewer_menu(view: Reviewer, menu: QMenu) -> None:
     """Add 'Bury N days' option to Reviewer More menu, above the first separator."""
     action = QAction("Bury N days", menu)
@@ -156,33 +165,32 @@ def add_reviewer_menu(view: Reviewer, menu: QMenu) -> None:
     add_action_to_menu(menu, action, 1)
 
 
-def cleanup_expired(conn: sqlite3.Connection) -> None:
+def cleanup_expired() -> None:
     """Remove expired entries."""
     now = int(time.time())
-    c = conn.cursor()
-    c.execute("DELETE FROM buried WHERE until <= ?", (now,))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM buried WHERE until <= ?", (now,))
+        conn.commit()
 
 
 def reapply_buries() -> None:
     """At Anki startup, re-bury still-active cards."""
     now = int(time.time())
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT cid FROM buried WHERE until > ?", (now,))
-    rows = c.fetchall()
 
-    if rows:
-        cids = [cid for (cid,) in rows]
-        op_result = mw.col.sched.buryCards(cids)
-        tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)))
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT cid FROM buried WHERE until > ?", (now,))
+        rows = c.fetchall()
 
-    # cleanup
-    if random.randint(1, 10) == 1:
-        cleanup_expired(conn)
+        if rows:
+            cids = [cid for (cid,) in rows]
+            op_result = mw.col.sched.buryCards(cids)
+            tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)))
 
-    conn.close()
+        # cleanup
+        if random.randint(1, 10) == 1:
+            cleanup_expired()
 
 
 # Initialize
