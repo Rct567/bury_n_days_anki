@@ -1,10 +1,13 @@
-from typing import Optional
+from functools import partial
+from typing import Optional, Union
 from aqt import QMenu, mw
 from aqt.qt import QAction, QInputDialog, QMessageBox
 from aqt.browser import Browser
 from aqt.reviewer import Reviewer
 from aqt.utils import tooltip
 from anki.hooks import addHook
+from aqt.operations.scheduling import bury_cards
+from anki.collection import OpChangesWithCount
 
 import sqlite3
 import random
@@ -95,7 +98,7 @@ def ask_days_range(parent) -> Optional[tuple[int, int]]:
     return days_range
 
 
-def bury_cards_ui(parent, cids: list[int]) -> None:
+def bury_cards_ui(parent: Union[Browser, Reviewer], cids: list[int]) -> None:
     """Shared UI logic for burying given card IDs."""
     if not cids:
         QMessageBox.information(parent, "Bury N days", "No cards selected.")
@@ -104,18 +107,24 @@ def bury_cards_ui(parent, cids: list[int]) -> None:
     days_range = ask_days_range(parent)
     if not days_range:
         return
+    
+    op_parent = parent.mw if isinstance(parent, Reviewer) else parent
+    
+    def _on_success(res: OpChangesWithCount) -> None:
+        if res.count == 0:
+            return
+
+        if days_range[0] == days_range[1]:
+            tooltip("Buried {} card(s) for {} days.".format(len(cids), days_range[0]), parent=op_parent)
+        else:
+            tooltip(
+                "Buried {} card(s) for {} to {} days.".format(len(cids), days_range[0], days_range[1], parent=op_parent)
+            )
 
     mark_cards_as_n_buried(cids, days_range)
-    mw.col.sched.buryCards(cids)
+    bury_cards(parent=op_parent, card_ids=cids).success(_on_success).run_in_background()
 
-    if days_range[0] == days_range[1]:
-        tooltip("Buried {} card(s) for {} days.".format(len(cids), days_range[0]))
-    else:
-        tooltip(
-            "Buried {} card(s) for {} to {} days.".format(
-                len(cids), days_range[0], days_range[1]
-            )
-        )
+
 
 
 def bury_browser_selected(browser: Browser) -> None:
@@ -174,7 +183,7 @@ def cleanup_expired() -> None:
         conn.commit()
 
 
-def reapply_buries() -> None:
+def reapply_buries(use_collection_op: bool) -> None:
     """At Anki startup, re-bury still-active cards."""
     now = int(time.time())
 
@@ -185,8 +194,13 @@ def reapply_buries() -> None:
 
         if rows:
             cids = [cid for (cid,) in rows]
-            op_result = mw.col.sched.buryCards(cids)
-            tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)))
+            if use_collection_op:
+                def _on_success(op_result: OpChangesWithCount) -> None:
+                    tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)), parent=mw)
+                bury_cards(parent=mw, card_ids=cids).success(_on_success).run_in_background()
+            else:
+                op_result = mw.col.sched.buryCards(cids)
+                tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)))
 
         # cleanup
         if random.randint(1, 10) == 1:
@@ -196,16 +210,16 @@ def reapply_buries() -> None:
 # Initialize
 init_db()
 addHook("browser.setupMenus", add_context_menu)
-addHook("profileLoaded", reapply_buries)
+addHook("profileLoaded", partial(reapply_buries, use_collection_op=False))
 
 try:
     from aqt import gui_hooks
 
     def on_sync_will_start(*_) -> None:
-        reapply_buries()
+        reapply_buries(use_collection_op=False)
 
     def on_sync_finished(*_) -> None:
-        reapply_buries()
+        reapply_buries(use_collection_op=False)
 
     gui_hooks.sync_will_start.append(on_sync_will_start)
     gui_hooks.sync_did_finish.append(on_sync_finished)
