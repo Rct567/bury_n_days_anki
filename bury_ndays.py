@@ -6,7 +6,7 @@ from aqt.browser import Browser
 from aqt.reviewer import Reviewer
 from aqt.utils import tooltip
 from anki.hooks import addHook
-from aqt.operations.scheduling import bury_cards
+from aqt.operations.scheduling import bury_cards, CollectionOp
 from anki.collection import OpChangesWithCount
 
 import sqlite3
@@ -194,13 +194,14 @@ def reapply_buries(use_collection_op: bool) -> None:
 
         if rows:
             cids = [cid for (cid,) in rows]
-            if use_collection_op:
-                def _on_success(op_result: OpChangesWithCount) -> None:
+            def _show_tooltip(op_result: OpChangesWithCount) -> None:
+                if op_result.count > 0:
                     tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)), parent=mw)
-                bury_cards(parent=mw, card_ids=cids).success(_on_success).run_in_background()
+            if use_collection_op:
+                CollectionOp(mw, lambda col: col.sched.bury_cards(cids, manual=False)).success(_show_tooltip).run_in_background()
             else:
-                op_result = mw.col.sched.buryCards(cids)
-                tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)))
+                op_result = mw.col.sched.buryCards(cids, manual=False)
+                _show_tooltip(op_result)
 
         # cleanup
         if random.randint(1, 10) == 1:
