@@ -1,5 +1,7 @@
 from functools import partial
-from typing import Optional, Union
+import json
+import pprint
+from typing import Any, Optional, Union
 from aqt import QMenu, mw
 from aqt.qt import QAction, QInputDialog, QMessageBox
 from aqt.browser import Browser
@@ -22,6 +24,23 @@ ADDON_USER_FILES_DIR = os.path.join(ADDON_DIR, "user_files")
 os.makedirs(ADDON_USER_FILES_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(ADDON_USER_FILES_DIR, "bury.db")
+
+
+var_dump_log_size = 0
+var_dump_log_count = 0
+
+def var_dump_log(var: Any) -> None:
+
+    global var_dump_log_size
+    global var_dump_log_count
+
+    if var_dump_log_size < (1024 * 1024) and var_dump_log_count < 100_000:
+        dump_log_file = os.path.join(os.path.dirname(__file__), 'dump.log')
+        with open(dump_log_file, 'a', encoding='utf-8') as file:
+            log_entry = pprint.pformat(var, sort_dicts=False, width=160)
+            file.write(log_entry + "\n\n=================================================================\n\n")
+        var_dump_log_size += len(log_entry)
+        var_dump_log_count += 1
 
 
 def init_db() -> None:
