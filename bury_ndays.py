@@ -8,6 +8,7 @@ from aqt.browser import Browser
 from aqt.reviewer import Reviewer
 from aqt.utils import tooltip
 from anki.hooks import addHook
+from anki.cards import CardId
 from aqt.operations.scheduling import bury_cards, CollectionOp
 from anki.collection import OpChangesWithCount
 
@@ -80,20 +81,50 @@ def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     return low_val, high_val
 
 
-def mark_cards_as_n_buried(cids: list[int], days_range: tuple[int, int]) -> None:
-    """Mark cards as buried for random number of days in [low, high]."""
+def mark_cards_as_n_buried(card_ids: list[int], days_range: tuple[int, int]) -> None:
+    """Mark cards as buried for a number of days based on FSRS stability, evenly distributed within [low, high]."""
+    
+    if not card_ids:
+        return
+
+    low, high = days_range
+    num_cards = len(card_ids)
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
-        data = []
+        
+        # Fetch cards
+        placeholders = ','.join('?' for _ in card_ids)
+        rows = mw.col.db.all(
+            "SELECT id, json_extract(data, '$.s') AS stability, ivl FROM cards WHERE id IN ({})".format(placeholders),
+            *card_ids
+        )
+        
+        # Check if FSRS is enabled 
+        use_fsrs = all(stability is not None for _, stability, _ in rows)
+
+        # Create card data
+        card_data = [(CardId(cid), float(stability) if stability is not None else 0.0, int(ivl)) for cid, stability, ivl in rows]
+        
+        # Sort
+        if use_fsrs: # Sort by stability (ascending)
+            card_data.sort(key=lambda x: x[1])
+        else: # Sort by interval (ascending)
+            card_data.sort(key=lambda x: x[2])
+        
+        # Calculate evenly spaced days
         current_time = int(time.time())
-
-        for cid in cids:
-            days = random.randint(days_range[0], days_range[1])
+        bury_data: list[tuple[CardId, int]] = []
+        for i, (cid, _, _) in enumerate(card_data):
+            if num_cards > 1:
+                days = low + round(i * (high - low) / (num_cards - 1))
+            else:
+                days = (low + high) // 2
             until_ts = current_time + days * SECONDS_IN_DAY
-            data.append((cid, until_ts))
-
+            bury_data.append((cid, until_ts))
+        
+        # Insert into buried table
         c.executemany(
-            "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", data
+            "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", bury_data
         )
         conn.commit()
 
