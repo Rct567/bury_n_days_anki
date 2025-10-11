@@ -1,22 +1,21 @@
 # Bury N Days – Anki Add-on
 
-This add-on allows you to bury selected cards in Anki for a specific number of days.
+This add-on allows you to bury cards in Anki for a specific number of days.
 
 ## Features
 
 * Adds **“Bury N days”** option to the Browser and Reviewer context menu.
 * Input either:
   * A single number (`10`) → buries for 10 days.
-  * A range (`1-100`) → buries each card for a random number of days between 1 and 100.
+  * A range (`1-100`) → buries cards between 1 and 100 days, evenly distributed based on FSRS's stability or interval.
 * Persists buried cards across restarts and syncs.
-* Re-applies buries on profile load, before sync and after sync.
 
 ## Installation
 
 1. Copy this add-on into your Anki `addons21` folder.
 2. Restart Anki.
 
-## Usage
+## Usage in the Browser
 
 1. Open the Browser.
 2. Select one or more cards.
