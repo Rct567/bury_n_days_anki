@@ -1,21 +1,21 @@
 from functools import partial
-import json
 import pprint
-from typing import Any, Optional, Union
-from aqt import QMenu, mw
-from aqt.qt import QAction, QInputDialog, QMessageBox
-from aqt.browser import Browser
-from aqt.reviewer import Reviewer
-from aqt.utils import tooltip
-from anki.hooks import addHook
-from anki.cards import CardId
-from aqt.operations.scheduling import bury_cards, CollectionOp
-from anki.collection import OpChangesWithCount
-
+from typing import Any, Optional, Sequence, Union
 import sqlite3
 import random
 import os
 import time
+
+from aqt import QMainWindow, QMenu, QWidget, mw
+from aqt.qt import QAction, QInputDialog, QMessageBox
+from aqt.browser.browser import Browser
+from aqt.reviewer import Reviewer
+from aqt.utils import tooltip
+from aqt.operations.scheduling import bury_cards
+from aqt.operations import CollectionOp
+from anki.hooks import addHook
+from anki.cards import CardId
+from anki.collection import OpChangesWithCount
 
 SECONDS_IN_DAY = 86400
 
@@ -81,11 +81,13 @@ def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     return low_val, high_val
 
 
-def mark_cards_as_n_buried(card_ids: list[int], days_range: tuple[int, int]) -> None:
+def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, int]) -> None:
     """Mark cards as buried for a number of days based on FSRS stability, evenly distributed within [low, high]."""
     
     if not card_ids:
         return
+    
+    assert mw.col is not None and mw.col.db is not None
 
     low, high = days_range
     num_cards = len(card_ids)
@@ -129,7 +131,7 @@ def mark_cards_as_n_buried(card_ids: list[int], days_range: tuple[int, int]) -> 
         conn.commit()
 
 
-def ask_days_range(parent) -> Optional[tuple[int, int]]:
+def ask_days_range(parent: QWidget) -> Optional[tuple[int, int]]:
     """Ask user for bury days input until valid or canceled."""
     days_range: Optional[tuple[int, int]] = None
     while days_range is None:
@@ -148,31 +150,32 @@ def ask_days_range(parent) -> Optional[tuple[int, int]]:
     return days_range
 
 
-def bury_cards_ui(parent: Union[Browser, Reviewer], cids: list[int]) -> None:
+def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> None:
     """Shared UI logic for burying given card IDs."""
+    
+    parent_window: QMainWindow = parent.mw if isinstance(parent, Reviewer) else parent
+    
     if not cids:
-        QMessageBox.information(parent, "Bury N days", "No cards selected.")
+        QMessageBox.information(parent_window, "Bury N days", "No cards selected.")
         return
 
-    days_range = ask_days_range(parent)
+    days_range = ask_days_range(parent_window)
     if not days_range:
         return
-    
-    op_parent = parent.mw if isinstance(parent, Reviewer) else parent
     
     def _on_success(res: OpChangesWithCount) -> None:
         if res.count == 0:
             return
 
         if days_range[0] == days_range[1]:
-            tooltip("Buried {} card(s) for {} days.".format(len(cids), days_range[0]), parent=op_parent)
+            tooltip("Buried {} card(s) for {} days.".format(len(cids), days_range[0]), parent=parent_window)
         else:
             tooltip(
-                "Buried {} card(s) for {} to {} days.".format(len(cids), days_range[0], days_range[1], parent=op_parent)
+                "Buried {} card(s) for {} to {} days.".format(len(cids), days_range[0], days_range[1], parent=parent_window)
             )
 
     mark_cards_as_n_buried(cids, days_range)
-    bury_cards(parent=op_parent, card_ids=cids).success(_on_success).run_in_background()
+    bury_cards(parent=parent_window, card_ids=cids).success(_on_success).run_in_background()
 
 
 
@@ -185,7 +188,7 @@ def bury_browser_selected(browser: Browser) -> None:
 def bury_reviewer_card(reviewer: Reviewer) -> None:
     """Triggered from Reviewer 'More' menu."""
     if reviewer.card:
-        bury_cards_ui(mw, [reviewer.card.id])
+        bury_cards_ui(reviewer, [reviewer.card.id])
 
 
 def add_action_to_menu(menu: QMenu, new_action: QAction, before_separator_index: int) -> None:
@@ -208,7 +211,7 @@ def add_action_to_menu(menu: QMenu, new_action: QAction, before_separator_index:
 def add_context_menu(browser: Browser) -> None:
     """Add 'Bury N days' option to Browser context menu."""
     action = QAction("Bury N days", browser)
-    action.triggered.connect(lambda _, b=browser: bury_browser_selected(b))
+    action.triggered.connect(lambda _, b=browser: bury_browser_selected(b)) # type: ignore
     menu = browser.form.menu_Cards
 
     # Add before second separator
@@ -218,7 +221,7 @@ def add_context_menu(browser: Browser) -> None:
 def add_reviewer_menu(view: Reviewer, menu: QMenu) -> None:
     """Add 'Bury N days' option to Reviewer More menu, above the first separator."""
     action = QAction("Bury N days", menu)
-    action.triggered.connect(lambda _, r=view: bury_reviewer_card(r))
+    action.triggered.connect(lambda _, r=view: bury_reviewer_card(r)) # type: ignore
 
     # Add before first separator
     add_action_to_menu(menu, action, 1)
@@ -235,6 +238,7 @@ def cleanup_expired() -> None:
 
 def reapply_buries(use_collection_op: bool) -> None:
     """At Anki startup, re-bury still-active cards."""
+    assert mw.col is not None and mw.col.sched is not None
     now = int(time.time())
 
     with sqlite3.connect(DB_PATH) as conn:
