@@ -30,6 +30,7 @@ DB_PATH = os.path.join(ADDON_USER_FILES_DIR, "bury.db")
 var_dump_log_size = 0
 var_dump_log_count = 0
 
+
 def var_dump_log(var: Any) -> None:
 
     global var_dump_log_size
@@ -83,36 +84,36 @@ def parse_days_range(text: str) -> Optional[tuple[int, int]]:
 
 def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, int]) -> None:
     """Mark cards as buried for a number of days based on FSRS stability, evenly distributed within [low, high]."""
-    
+
     if not card_ids:
         return
-    
+
     assert mw.col is not None and mw.col.db is not None
 
     low, high = days_range
     num_cards = len(card_ids)
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
-        
+
         # Fetch cards
         placeholders = ','.join('?' for _ in card_ids)
         rows = mw.col.db.all(
             "SELECT id, json_extract(data, '$.s') AS stability, ivl FROM cards WHERE id IN ({})".format(placeholders),
             *card_ids
         )
-        
-        # Check if FSRS is enabled 
+
+        # Check if FSRS is enabled
         use_fsrs = all(stability is not None for _, stability, _ in rows)
 
         # Create card data
         card_data = [(CardId(cid), float(stability) if stability is not None else 0.0, int(ivl)) for cid, stability, ivl in rows]
-        
+
         # Sort
-        if use_fsrs: # Sort by stability (ascending)
+        if use_fsrs:  # Sort by stability (ascending)
             card_data.sort(key=lambda x: x[1])
-        else: # Sort by interval (ascending)
+        else:  # Sort by interval (ascending)
             card_data.sort(key=lambda x: x[2])
-        
+
         # Calculate evenly spaced days
         current_time = int(time.time())
         bury_data: list[tuple[CardId, int]] = []
@@ -123,7 +124,7 @@ def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, in
                 days = (low + high) // 2
             until_ts = current_time + days * SECONDS_IN_DAY
             bury_data.append((cid, until_ts))
-        
+
         # Insert into buried table
         c.executemany(
             "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", bury_data
@@ -152,9 +153,9 @@ def ask_days_range(parent: QWidget) -> Optional[tuple[int, int]]:
 
 def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> None:
     """Shared UI logic for burying given card IDs."""
-    
+
     parent_window: QMainWindow = parent.mw if isinstance(parent, Reviewer) else parent
-    
+
     if not cids:
         QMessageBox.information(parent_window, "Bury N days", "No cards selected.")
         return
@@ -162,7 +163,7 @@ def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> N
     days_range = ask_days_range(parent_window)
     if not days_range:
         return
-    
+
     def _on_success(res: OpChangesWithCount) -> None:
         if res.count == 0:
             return
@@ -176,8 +177,6 @@ def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> N
 
     mark_cards_as_n_buried(cids, days_range)
     bury_cards(parent=parent_window, card_ids=cids).success(_on_success).run_in_background()
-
-
 
 
 def bury_browser_selected(browser: Browser) -> None:
@@ -211,7 +210,7 @@ def add_action_to_menu(menu: QMenu, new_action: QAction, before_separator_index:
 def add_context_menu(browser: Browser) -> None:
     """Add 'Bury N days' option to Browser context menu."""
     action = QAction("Bury N days", browser)
-    action.triggered.connect(lambda _, b=browser: bury_browser_selected(b)) # type: ignore
+    action.triggered.connect(lambda _, b=browser: bury_browser_selected(b))  # type: ignore
     menu = browser.form.menu_Cards
 
     # Add before second separator
@@ -221,7 +220,7 @@ def add_context_menu(browser: Browser) -> None:
 def add_reviewer_menu(view: Reviewer, menu: QMenu) -> None:
     """Add 'Bury N days' option to Reviewer More menu, above the first separator."""
     action = QAction("Bury N days", menu)
-    action.triggered.connect(lambda _, r=view: bury_reviewer_card(r)) # type: ignore
+    action.triggered.connect(lambda _, r=view: bury_reviewer_card(r))  # type: ignore
 
     # Add before first separator
     add_action_to_menu(menu, action, 1)
@@ -248,6 +247,7 @@ def reapply_buries(use_collection_op: bool) -> None:
 
         if rows:
             cids = [cid for (cid,) in rows]
+
             def _show_tooltip(op_result: OpChangesWithCount) -> None:
                 if op_result.count > 0:
                     tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)), parent=mw)
