@@ -1,0 +1,19 @@
+[tool.autopep8]
+max_line_length = 200
+
+
+[tool.pyright]
+typeCheckingMode="strict"
+exclude = ["releases", "build", "user_files"]
+reportMissingImports = true
+reportMissingTypeStubs = true
+reportUnusedImport = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = true
+reportUnnecessaryIsInstance = false
+reportMissingTypeArgument = true
+reportImplicitStringConcatenation = true
+reportImplicitOverride = true
+reportWildcardImportFromLibrary = true
