@@ -235,7 +235,7 @@ def cleanup_expired() -> None:
         conn.commit()
 
 
-def reapply_buries(use_collection_op: bool) -> None:
+def reapply_buries(use_collection_op: bool = True) -> None:
     """At Anki startup, re-bury still-active cards."""
     assert mw.col is not None and mw.col.sched is not None
     now = int(time.time())
@@ -265,16 +265,16 @@ def reapply_buries(use_collection_op: bool) -> None:
 # Initialize
 init_db()
 addHook("browser.setupMenus", add_context_menu)
-addHook("profileLoaded", partial(reapply_buries, use_collection_op=False))
+addHook("profileLoaded", reapply_buries)
 
 try:
     from aqt import gui_hooks
 
     def on_sync_will_start(*_) -> None:
-        reapply_buries(use_collection_op=False)
+        reapply_buries()
 
     def on_sync_finished(*_) -> None:
-        reapply_buries(use_collection_op=False)
+        reapply_buries()
 
     gui_hooks.sync_will_start.append(on_sync_will_start)
     gui_hooks.sync_did_finish.append(on_sync_finished)
