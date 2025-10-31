@@ -10,8 +10,8 @@ from aqt import QMainWindow, QMenu, QWidget, mw
 from aqt.qt import QAction, QInputDialog, QMessageBox
 from aqt.browser.browser import Browser
 from aqt.reviewer import Reviewer
-from aqt.utils import tooltip
-from aqt.operations.scheduling import bury_cards
+from aqt.utils import tooltip, askUser
+from aqt.operations.scheduling import bury_cards, unbury_cards
 from aqt.operations import CollectionOp
 from anki.hooks import addHook
 from anki.cards import CardId
@@ -76,7 +76,7 @@ def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     except ValueError:
         return None
 
-    if low_val < 1:
+    if low_val < 1 and not (low_val == 0 and high_val == 0):
         return None
 
     return low_val, high_val
@@ -161,7 +161,14 @@ def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> N
         return
 
     days_range = ask_days_range(parent_window)
+    
     if not days_range:
+        return
+    
+    if days_range == (0, 0):
+        if askUser("Unbury cards?"):
+            unmark_cards_as_n_buried(cids)
+            unbury_cards(parent=parent_window, card_ids=cids).run_in_background()
         return
 
     def _on_success(res: OpChangesWithCount) -> None:
@@ -235,8 +242,22 @@ def cleanup_expired() -> None:
         conn.commit()
 
 
+def unmark_cards_as_n_buried(cids: Sequence[CardId]) -> None:
+    """Unmark cards as N buried."""
+    if not cids:
+        return
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        placeholders = ','.join('?' for _ in cids)
+        c.execute(
+            "DELETE FROM buried WHERE cid IN ({})".format(placeholders), 
+            cids
+        )
+        conn.commit()
+
 def reapply_buries(use_collection_op: bool = True) -> None:
-    """At Anki startup, re-bury still-active cards."""
+    """Re-bury cards marked as N buried."""
     assert mw.col is not None and mw.col.sched is not None
     now = int(time.time())
 
