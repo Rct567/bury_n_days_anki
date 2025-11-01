@@ -1,6 +1,6 @@
 from functools import partial
 import pprint
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Callable, Optional, Sequence, Union
 import sqlite3
 import random
 import os
@@ -13,6 +13,7 @@ from aqt.reviewer import Reviewer
 from aqt.utils import tooltip, askUser
 from aqt.operations.scheduling import bury_cards, unbury_cards
 from aqt.operations import CollectionOp, QueryOp
+from anki.collection import Collection
 from anki.hooks import addHook
 from anki.cards import CardId
 from anki.collection import OpChangesWithCount
@@ -82,7 +83,7 @@ def parse_days_range(text: str) -> Optional[tuple[int, int]]:
     return low_val, high_val
 
 
-def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, int]) -> None:
+def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, int], on_success: Callable[[int], None] = lambda n: None) -> None:
     """Mark cards as buried for a number of days based on FSRS stability, evenly distributed within [low, high]."""
 
     if not card_ids:
@@ -92,12 +93,13 @@ def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, in
 
     low, high = days_range
     num_cards = len(card_ids)
-    with sqlite3.connect(DB_PATH) as conn:
-        c = conn.cursor()
-
+    
+    def _mark_in_background(col: Collection) -> int:
+        """Runs in background thread."""
+        assert col.db is not None
         # Fetch cards
         placeholders = ','.join('?' for _ in card_ids)
-        rows = mw.col.db.all(
+        rows = col.db.all(
             "SELECT id, json_extract(data, '$.s') AS stability, ivl FROM cards WHERE id IN ({})".format(placeholders),
             *card_ids
         )
@@ -106,7 +108,8 @@ def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, in
         use_fsrs = all(stability is not None for _, stability, _ in rows)
 
         # Create card data
-        card_data = [(CardId(cid), float(stability) if stability is not None else 0.0, int(ivl)) for cid, stability, ivl in rows]
+        card_data = [(CardId(cid), float(stability) if stability is not None else 0.0, int(ivl)) 
+                     for cid, stability, ivl in rows]
 
         # Sort
         if use_fsrs:  # Sort by stability (ascending)
@@ -126,10 +129,16 @@ def mark_cards_as_n_buried(card_ids: Sequence[CardId], days_range: tuple[int, in
             bury_data.append((cid, until_ts))
 
         # Insert into buried table
-        c.executemany(
-            "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", bury_data
-        )
-        conn.commit()
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.executemany(
+                "INSERT OR REPLACE INTO buried (cid, until) VALUES (?, ?)", bury_data
+            )
+            conn.commit()
+        
+        return len(card_ids)
+    
+    QueryOp(parent=mw, op=_mark_in_background, success=on_success).run_in_background()
 
 
 def ask_days_range(parent: QWidget) -> Optional[tuple[int, int]]:
@@ -171,7 +180,8 @@ def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> N
             unbury_cards(parent=parent_window, card_ids=cids).run_in_background()
         return
 
-    def _on_success(res: OpChangesWithCount) -> None:
+
+    def _on_bury_success(res: OpChangesWithCount) -> None:
         if res.count == 0:
             return
 
@@ -183,7 +193,7 @@ def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> N
             )
 
     mark_cards_as_n_buried(cids, days_range)
-    bury_cards(parent=parent_window, card_ids=cids).success(_on_success).run_in_background()
+    bury_cards(parent=parent_window, card_ids=cids).success(_on_bury_success).run_in_background()
 
 
 def bury_browser_selected(browser: Browser) -> None:
