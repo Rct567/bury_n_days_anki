@@ -12,7 +12,7 @@ from aqt.browser.browser import Browser
 from aqt.reviewer import Reviewer
 from aqt.utils import tooltip, askUser
 from aqt.operations.scheduling import bury_cards, unbury_cards
-from aqt.operations import CollectionOp
+from aqt.operations import CollectionOp, QueryOp
 from anki.hooks import addHook
 from anki.cards import CardId
 from anki.collection import OpChangesWithCount
@@ -256,31 +256,38 @@ def unmark_cards_as_n_buried(cids: Sequence[CardId]) -> None:
         )
         conn.commit()
 
-def reapply_buries(use_collection_op: bool = True) -> None:
+def reapply_buries() -> None:
     """Re-bury cards marked as N buried."""
-    assert mw.col is not None and mw.col.sched is not None
-    now = int(time.time())
-
-    with sqlite3.connect(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("SELECT cid FROM buried WHERE until > ?", (now,))
-        rows = c.fetchall()
-
-        if rows:
-            cids = [cid for (cid,) in rows]
-
+    assert mw.col is not None
+    
+    def fetch_buried_cards(_) -> list[CardId]:
+        now = int(time.time())
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("SELECT cid FROM buried WHERE until > ?", (now,))
+            rows = c.fetchall()
+            return [CardId(cid) for (cid,) in rows]
+    
+    def on_fetch_success(cids: list[CardId]) -> None:
+        if cids:
             def _show_tooltip(op_result: OpChangesWithCount) -> None:
                 if op_result.count > 0:
                     tooltip("Re-buried {} of {} cards.".format(op_result.count, len(cids)), parent=mw)
-            if use_collection_op:
-                CollectionOp(mw, lambda col: col.sched.bury_cards(cids, manual=False)).success(_show_tooltip).run_in_background()
-            else:
-                op_result = mw.col.sched.buryCards(cids, manual=False)
-                _show_tooltip(op_result)
-
-        # cleanup
+            
+            CollectionOp(
+                mw, 
+                lambda col: col.sched.bury_cards(cids, manual=False)
+            ).success(_show_tooltip).run_in_background()
+        
+        # Cleanup with 10% probability
         if random.randint(1, 10) == 1:
             cleanup_expired()
+    
+    QueryOp(
+        parent=mw,
+        op=fetch_buried_cards,
+        success=on_fetch_success
+    ).without_collection().run_in_background()
 
 
 # Initialize
