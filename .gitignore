@@ -4,4 +4,5 @@ user_files/
 meta.json
 *_temp.anki2
 *.anki2-wal
+*.zip
 cache*.sqlite
