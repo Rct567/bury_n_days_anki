@@ -1,4 +1,3 @@
-from functools import partial
 import pprint
 from typing import Any, Callable, Optional, Sequence, Union
 import sqlite3
