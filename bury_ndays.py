@@ -189,7 +189,8 @@ def bury_cards_ui(parent: Union[Browser, Reviewer], cids: Sequence[CardId]) -> N
             tooltip("Buried {} card(s) for {} days.".format(len(cids), days_range[0]), parent=parent_window)
         else:
             tooltip(
-                "Buried {} card(s) for {} to {} days.".format(len(cids), days_range[0], days_range[1], parent=parent_window)
+                "Buried {} card(s) for {} to {} days.".format(len(cids), days_range[0], days_range[1]), 
+                parent=parent_window
             )
 
     mark_cards_as_n_buried(cids, days_range)
